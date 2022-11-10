@@ -12,15 +12,22 @@ app.use(express.json())
 const mongoClient = new MongoClient("mongodb://localhost:27017")
 let dataBase;
 
-
+// Conectando banco de Dados
 mongoClient.connect().then(() => {
     dataBase = mongoClient.db("dbBatePapoUol")
 }).catch((error) => { console.log(error) })
 
 
-// Padrão de validação do nome do usuário
+// Validação do nome do usuário
 const nameSchema = joi.object({
     name: joi.string().alphanum().max(30).required()
+})
+
+// Validação da mensagem
+const messageSchema = joi.object({
+    to: joi.string().required(),
+    text: joi.string().required(),
+    type: joi.string().valid("message", "private_message")
 })
 
 
@@ -63,6 +70,32 @@ app.get("/participants", (req, res) => {
     dataBase.collection("participants").find({}).toArray()
         .then((participants) => { res.status(200).send(participants) })
         .catch((error) => { console.log(error) })
+})
+
+// ENVIAR MENSAGENS
+app.post("/messages", (req, res) => {
+    let newMessage = req.body
+    let user = req.headers.user
+    const { error, value } = messageSchema.validate(newMessage)
+
+    // Validação do to, text, type
+    if (error) {
+        return res.status(422).send(error.message)
+    }
+    // Verificando se participante existe
+    dataBase.collection("participants").find({ name: user }).toArray()
+        .then((participant) => {
+            if (participant.length) {
+                newMessage = { from: user, to: newMessage.to, text: newMessage.text, type: newMessage.type, time: dayjs().format("HH:MM:ss") }
+
+                // Enviando a mensagem do participante
+                dataBase.collection("messages").insertOne(newMessage)
+                    .then((response) => { res.status(201).send(`Mensagem Enviada por ${console.log(user)}`) })
+                    .catch((error) => { console.log(error) })
+            } else {
+                return res.status(422).send()
+            }
+        }).catch((error) => { console.log(error) })
 })
 
 // LISTA DE MENSAGENS
