@@ -17,7 +17,6 @@ mongoClient.connect().then(() => {
     dataBase = mongoClient.db("dbBatePapoUol")
 }).catch((error) => { console.log(error) })
 
-
 // Validação do nome do usuário
 const nameSchema = joi.object({
     name: joi.string().alphanum().max(30).required()
@@ -30,11 +29,9 @@ const messageSchema = joi.object({
     type: joi.string().valid("message", "private_message")
 })
 
-
 // CADASTRO DE USUÁRIO
 app.post("/participants", (req, res) => {
     let newParticipant = req.body
-
 
     // Verificação que não é vazio
     const { error, value } = nameSchema.validate(newParticipant)
@@ -49,7 +46,7 @@ app.post("/participants", (req, res) => {
                 return res.status(409).send("Esse nome já está sendo utilizado")
             } else {
                 newParticipant = { name: newParticipant.name, lastStatus: Date.now() }
-                let newMessage = { from: newParticipant.name, to: "Todos", text: "entra na sala...", type: "status", time: 0, time: dayjs().format("HH:MM:ss") }
+                let newMessage = { from: newParticipant.name, to: "Todos", text: "entra na sala...", type: "status", time: dayjs().format("HH:mm:ss") }
 
                 // Inserindo novo Participante
                 dataBase.collection("participants").insertOne(newParticipant)
@@ -86,7 +83,7 @@ app.post("/messages", (req, res) => {
     dataBase.collection("participants").find({ name: user }).toArray()
         .then((participant) => {
             if (participant.length) {
-                newMessage = { from: user, to: newMessage.to, text: newMessage.text, type: newMessage.type, time: dayjs().format("HH:MM:ss") }
+                newMessage = { from: user, to: newMessage.to, text: newMessage.text, type: newMessage.type, time: dayjs().format("HH:mm:ss") }
 
                 // Enviando a mensagem do participante
                 dataBase.collection("messages").insertOne(newMessage)
@@ -100,10 +97,59 @@ app.post("/messages", (req, res) => {
 
 // LISTA DE MENSAGENS
 app.get("/messages", (req, res) => {
-    dataBase.collection("messages").find().toArray()
-        .then((messages) => { res.status(200).send(messages) })
+    let limit = req.query.limit
+    let user = req.headers.user
+    //return res.status(200).send(messages.slice(-limit).reverse()
+    // Query String
+    if (limit) {
+        dataBase.collection("messages").find({ $or: [{ to: user }, { to: "Todos" }, { from: user }] }).toArray()
+            .then((messages) => { return res.status(200).send(messages.slice(-limit).reverse()) })
+            .catch((error) => { console.log(error) })
+    } else {
+        dataBase.collection("messages").find({ $or: [{ to: user }, { to: "Todos" }, { from: user }] }).toArray()
+            .then((messages) => { return res.status(200).send(messages) })
+            .catch((error) => { console.log(error) })
+    }
+})
+
+//STATUS
+app.post("/status", (req, res) => {
+    let user = req.headers.user
+
+    dataBase.collection("participants").find({ name: user }).toArray()
+        .then((participant) => {
+            if (participant.length) {
+                dataBase.collection("participants").update({ name: user }, { $set: { lastStatus: Date.now() } })
+                    .then(() => { return res.sendStatus(200) })
+                    .catch((error) => { console.log() })
+
+
+            } else {
+                return res.send(404)
+            }
+        })
         .catch((error) => { console.log(error) })
 })
 
+//Remoção automática de usuários inativos
+setInterval(() => {
+    dataBase.collection("participants").find().toArray()
+        .then((participants) => {
+            participants.map((participant) => {
+                let offStatus = Date.now() - participant.lastStatus
+                if (offStatus > 10000) {
+                    dataBase.collection("participants").deleteOne({ name: participant.name })
+                        .then(() => {
+                            let newMessage = { from: participant.name, to: "Todos", text: "sai da sala...", type: "status", time: dayjs().format("HH:mm:ss") }
+                            dataBase.collection("messages").insertOne(newMessage)
+                                .then(() => {console.log("Removido com sucesso")})
+                                .catch((error) => {console.log(error)})
+                        }).catch((error) => {console.log(error)})
+                }
+                console.log(participant.lastStatus)
+            })
+        })
+        .catch((error) => { console.log(error) })
+}, 15000)
 
 app.listen(5000, () => { console.log("Server Running on port 5000") })
